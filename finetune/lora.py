@@ -25,33 +25,40 @@ from lit_gpt.utils import (
     load_checkpoint,
     num_parameters,
 )
-from scripts.prepare_alpaca import generate_prompt
+from scripts.prepare_csv import generate_prompt
 
-eval_interval = 100
-save_interval = 100
-eval_iters = 100
-eval_max_new_tokens = 100
 log_interval = 1
 devices = 1
 
+train_size = 31501  # v0.1a1: 31501
+val_size = 3505  # v0.1a1: 3505
+
 # Hyperparameters
 learning_rate = 3e-4
-batch_size = 128
-micro_batch_size = 4
+batch_size = 128  # 128
+micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
-max_iters = 50000  # train dataset size
+max_iters = train_size // micro_batch_size
 weight_decay = 0.01
-lora_r = 8
-lora_alpha = 16
+lora_r = 256  # 256
+lora_alpha = 512  # 512
 lora_dropout = 0.05
 lora_query = True
-lora_key = False
+lora_key = True
 lora_value = True
-lora_projection = False
-lora_mlp = False
-lora_head = False
+lora_projection = True
+lora_mlp = True
+lora_head = True
 warmup_steps = 100
+
+num_evals = 40
+eval_interval = (max_iters / gradient_accumulation_iters) // num_evals
+# eval_interval = 10
+# save_interval = eval_interval
+# eval_iters = val_size // micro_batch_size
+eval_iters = 100
+eval_max_new_tokens = 100
 
 hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str)) and not k.startswith("_")}
 
@@ -153,8 +160,8 @@ def main(fabric: L.Fabric, data_dir: Path, checkpoint_dir: Path, out_dir: Path) 
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
     # Save the final LoRA checkpoint at the end of training
-    save_path = out_dir / "lit_model_lora_finetuned.pth"
-    save_lora_checkpoint(fabric, model, save_path)
+    # save_path = out_dir / "lit_model_lora_finetuned.pth"
+    # save_lora_checkpoint(fabric, model, save_path)
 
 
 def train(
@@ -181,6 +188,7 @@ def train(
     step_count = 0
     total_lengths = 0
     total_t0 = time.perf_counter()
+    best_val_loss = 100.
 
     for iter_num in range(1, max_iters + 1):
         if step_count <= warmup_steps:
@@ -225,11 +233,19 @@ def train(
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_data, tokenizer, max_iters=eval_iters)
             t1 = time.perf_counter() - t0
-            fabric.print(f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms")
+            fabric.print(
+                f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms, best val loss {best_val_loss:.4f}"
+                f"{'. Lets save the best model...' if best_val_loss > val_loss.item() else ''}"
+            )
             fabric.barrier()
-        if not is_accumulating and step_count % save_interval == 0:
-            checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
-            save_lora_checkpoint(fabric, model, checkpoint_path)
+            if best_val_loss > val_loss.item():
+                best_val_loss = val_loss.item()
+                # checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
+                checkpoint_path = out_dir / "lit_model_lora_finetuned.pth"
+                save_lora_checkpoint(fabric, model, checkpoint_path)    
+        # if not is_accumulating and step_count % save_interval == 0:
+        #     checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
+        #     save_lora_checkpoint(fabric, model, checkpoint_path)
 
 
 # FSDP has issues with `inference_mode`
@@ -245,9 +261,7 @@ def validate(fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Toke
     val_loss = losses.mean()
 
     # produce an example:
-    instruction = "Recommend a movie for me to watch during the weekend and explain the reason."
-    fabric.print(instruction)
-    sample = {"instruction": instruction, "input": ""}
+    sample = {"input": "a photo of a ML engineer"}
     prompt = generate_prompt(sample)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     with fabric.init_tensor():
