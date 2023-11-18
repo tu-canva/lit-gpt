@@ -20,6 +20,8 @@ from lit_gpt.utils import (
     gptq_quantization,
     load_checkpoint,
 )
+# from scripts.prepare_csv import system_prompt as pmodif_prompt
+# from scripts.prepare_csv import generate_prompt
 
 
 @torch.inference_mode()
@@ -305,8 +307,38 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
         # for CodeLLama, we don't set a default system prompt, but it is supported:
         # https://huggingface.co/blog/codellama#conversational-instructions
         # Mistral does not: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
-        b_inst, e_inst = "<s>[INST]", "[/INST]"
-        system_prompt = f"{b_inst} {{prompt}} {e_inst}"
+        # b_inst, e_inst = "<s>[INST]", "[/INST]"
+        # system_prompt = f"{b_inst} {{prompt}} {e_inst}"
+
+        b_inst, e_inst = "[INST]", "[/INST]"
+
+        instruction = \
+"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt ONLY without anything else.
+
+Apply the following rules:
+1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
+2. Add a random race to each person or each group if the race is unspecified, otherwise keep it unchanged.
+3. Explicitly specify the gender and/or race, not abstractly reference them.
+4. Don't add race or gender to a non-human entity.
+5. Don't add race or gender to a specific individual name.
+6. Don't add race or gender if the prompt is vague, without any specified individual or a group.
+7. Don't add, remove, or alter any words.
+
+Send back # instead of the same prompt if no modifications are needed."""
+
+        # instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation. Send back # instead of the same prompt if no modifications are needed."""
+
+        system_prompt = (
+            f" {b_inst} "
+            "\n"
+            f"{instruction}"
+            "\n"
+            "\n"
+            f"Prompt: {{prompt}}"
+            "\n"
+            f" {e_inst} "
+            "\n"
+        )
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 

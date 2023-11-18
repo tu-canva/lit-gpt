@@ -19,11 +19,12 @@ COLUMNS = ("instruction", "input", "output")
 
 b_inst, e_inst = "[INST]", "[/INST]"
 
-instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
+instruction = \
+"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
 
 Apply the following rules:
-1. Add a random, diverse gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
-2. Add a random, diverse ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
+1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
+2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
 3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
 4. Don't add ethnicity or gender to a non-human entity.
 5. Don't add ethnicity or gender to a specific individual name.

@@ -14,15 +14,15 @@ sys.path.append(str(wd))
 from lit_gpt.lora import GPT, Config, lora_filter, merge_lora_weights
 from lit_gpt.utils import check_valid_checkpoint_dir, get_default_supported_precision, lazy_load
 
-lora_r = 8
-lora_alpha = 16
+lora_r = 256  # 256
+lora_alpha = 512  # 512
 lora_dropout = 0.05
 lora_query = True
-lora_key = False
+lora_key = True
 lora_value = True
-lora_projection = False
-lora_mlp = False
-lora_head = False
+lora_projection = True
+lora_mlp = True
+lora_head = True
 
 
 def merge_lora(
@@ -70,6 +70,7 @@ def merge_lora(
 
     merge_lora_weights(model)
 
+    out_dir.mkdir(parents=True, exist_ok=True)
     save_path = out_dir / "lit_model.pth"
     fabric.print(f"Saving weights to {str(save_path)!r}")
     # remove lora parameters and the lora linear substring

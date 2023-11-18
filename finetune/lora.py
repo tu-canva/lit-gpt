@@ -13,7 +13,7 @@ from lightning.fabric.utilities import ThroughputMonitor
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
-sys.path.append(str(wd))
+sys.path.insert(0, str(wd))
 
 from generate.base import generate
 from lit_gpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable
@@ -30,16 +30,17 @@ from scripts.prepare_csv import generate_prompt
 log_interval = 1
 devices = 1
 
-train_size = 31501  # v0.1a1: 31501
-val_size = 3505  # v0.1a1: 3505
+train_size = 4111  # v0.1a1: 31501
+val_size = 461  # v0.1a1: 3505
 
 # Hyperparameters
+num_epochs = 2
 learning_rate = 3e-4
 batch_size = 128  # 128
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
-max_iters = train_size // micro_batch_size
+max_iters = num_epochs * (train_size // micro_batch_size)
 weight_decay = 0.01
 lora_r = 256  # 256
 lora_alpha = 512  # 512
@@ -50,14 +51,15 @@ lora_value = True
 lora_projection = True
 lora_mlp = True
 lora_head = True
-warmup_steps = 100
+warmup_steps = (max_iters // gradient_accumulation_iters) // 10  # 0.1 * num_steps
 
-num_evals = 40
-eval_interval = (max_iters / gradient_accumulation_iters) // num_evals
+num_evals = 100
+eval_interval = (max_iters // gradient_accumulation_iters) // num_evals  # num_steps // num_evals
+eval_interval = max(eval_interval, 1)
 # eval_interval = 10
 # save_interval = eval_interval
 # eval_iters = val_size // micro_batch_size
-eval_iters = 100
+eval_iters = val_size  # 100
 eval_max_new_tokens = 100
 
 hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str)) and not k.startswith("_")}
@@ -160,8 +162,8 @@ def main(fabric: L.Fabric, data_dir: Path, checkpoint_dir: Path, out_dir: Path) 
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
     # Save the final LoRA checkpoint at the end of training
-    # save_path = out_dir / "lit_model_lora_finetuned.pth"
-    # save_lora_checkpoint(fabric, model, save_path)
+    save_path = out_dir / "lit_model_lora_finetuned_final.pth"
+    save_lora_checkpoint(fabric, model, save_path)
 
 
 def train(
@@ -176,7 +178,8 @@ def train(
 ) -> None:
     tokenizer = Tokenizer(checkpoint_dir)
     longest_seq_length, longest_seq_ix = get_longest_seq_length(train_data)
-    model.max_seq_length = longest_seq_length
+    # model.max_seq_length = longest_seq_length
+    model.max_seq_length = 512
     fabric.print(
         f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
         f" {model.max_seq_length} and context length is {model.config.block_size}"
@@ -267,7 +270,7 @@ def validate(fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Toke
     with fabric.init_tensor():
         # do not set `max_seq_length=max_returned_token` because memory is not a concern here
         model.set_kv_cache(batch_size=1)
-    output = generate(model, encoded, max_returned_tokens=len(encoded) + eval_max_new_tokens, temperature=0.8)
+    output = generate(model, encoded, max_returned_tokens=len(encoded) + eval_max_new_tokens, temperature=0.8, eos_id=tokenizer.eos_id)
     model.clear_kv_cache()
     output = tokenizer.decode(output)
     fabric.print(output)
