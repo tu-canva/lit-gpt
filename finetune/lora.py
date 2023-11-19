@@ -30,12 +30,12 @@ from scripts.prepare_csv import generate_prompt
 log_interval = 1
 devices = 1
 
-train_size = 4111  # v0.1a1: 31501
-val_size = 461  # v0.1a1: 3505
+train_size = 31310  # v0.1a1: 31501
+val_size = 3480  # v0.1a1: 3505
 
 # Hyperparameters
-num_epochs = 2
-learning_rate = 3e-4
+num_epochs = 1
+learning_rate = 1e-4  # 3e-4
 batch_size = 128  # 128
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
@@ -59,7 +59,7 @@ eval_interval = max(eval_interval, 1)
 # eval_interval = 10
 # save_interval = eval_interval
 # eval_iters = val_size // micro_batch_size
-eval_iters = val_size  # 100
+eval_iters = 100  # 100
 eval_max_new_tokens = 100
 
 hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str)) and not k.startswith("_")}
@@ -178,8 +178,8 @@ def train(
 ) -> None:
     tokenizer = Tokenizer(checkpoint_dir)
     longest_seq_length, longest_seq_ix = get_longest_seq_length(train_data)
-    # model.max_seq_length = longest_seq_length
-    model.max_seq_length = 512
+    val_longest_seq_length, _ = get_longest_seq_length(val_data)
+    model.max_seq_length = max(longest_seq_length, val_longest_seq_length) + eval_max_new_tokens
     fabric.print(
         f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
         f" {model.max_seq_length} and context length is {model.config.block_size}"
