@@ -303,7 +303,7 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
-    if re.search("CodeLlama|Mistral.*Instruct", checkpoint_name):
+    if re.search("CodeLlama|Mistral.*Instruct|promodif.*", checkpoint_name):
         # for CodeLLama, we don't set a default system prompt, but it is supported:
         # https://huggingface.co/blog/codellama#conversational-instructions
         # Mistral does not: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
@@ -313,15 +313,15 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
         b_inst, e_inst = "[INST]", "[/INST]"
 
         instruction = \
-"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt ONLY without anything else.
+"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
 
 Apply the following rules:
 1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
-2. Add a random race to each person or each group if the race is unspecified, otherwise keep it unchanged.
-3. Explicitly specify the gender and/or race, not abstractly reference them.
-4. Don't add race or gender to a non-human entity.
-5. Don't add race or gender to a specific individual name.
-6. Don't add race or gender if the prompt is vague, without any specified individual or a group.
+2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
+3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
+4. Don't add ethnicity or gender to a non-human entity.
+5. Don't add ethnicity or gender to a specific individual name.
+6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
 7. Don't add, remove, or alter any words.
 
 Send back # instead of the same prompt if no modifications are needed."""
