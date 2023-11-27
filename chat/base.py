@@ -119,6 +119,7 @@ def main(
     checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-tuned-alpha-3b"),
     quantize: Optional[Literal["bnb.nf4", "bnb.nf4-dq", "bnb.fp4", "bnb.fp4-dq", "bnb.int8", "gptq.int4"]] = None,
     precision: Optional[str] = None,
+    to_lower: Optional[bool] = False,
 ) -> None:
     """Starts a conversation with a tuned GPT model.
 
@@ -176,6 +177,8 @@ def main(
             break
         if not prompt:
             break
+        if to_lower:
+            prompt = prompt.lower()
         prompt = system_prompt.format(prompt=prompt)
         encoded_prompt = tokenizer.encode(prompt, device=fabric.device)
 
@@ -312,19 +315,35 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
 
         b_inst, e_inst = "[INST]", "[/INST]"
 
+#         instruction = \
+# """Extract description for each person or group of people from a given text.
+# - Description format: < |ethnicity| [gender] {{identity}} >
+# - Put |na| for the ethnicity if it is unspecified.
+# - Put [na] for the gender if it is unspecified.
+# - Put |unk| for the ethnicity and [unk] for the gender for a proper name.
+# - Put [mixed-gender] for the gender of a group of people.
+# - Use the same words with the same singular or plural form of the identity in the prompt.
+
+# Return a list of descriptions or an empty string if the text does not involve any person."""
+
+
         instruction = \
-"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
+"""Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
+Return an empty string if the text does not involve any person."""
 
-Apply the following rules:
-1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
-2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
-3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
-4. Don't add ethnicity or gender to a non-human entity.
-5. Don't add ethnicity or gender to a specific individual name.
-6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
-7. Don't add, remove, or alter any words.
+#         instruction = \
+# """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
 
-Send back # instead of the same prompt if no modifications are needed."""
+# Apply the following rules:
+# 1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
+# 2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
+# 3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
+# 4. Don't add ethnicity or gender to a non-human entity.
+# 5. Don't add ethnicity or gender to a specific individual name.
+# 6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
+# 7. Don't add, remove, or alter any words.
+
+# Send back # instead of the same prompt if no modifications are needed."""
 
         # instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation. Send back # instead of the same prompt if no modifications are needed."""
 
@@ -334,7 +353,7 @@ Send back # instead of the same prompt if no modifications are needed."""
             f"{instruction}"
             "\n"
             "\n"
-            f"Prompt: {{prompt}}"
+            f"text: {{prompt}}"
             "\n"
             f" {e_inst} "
             "\n"

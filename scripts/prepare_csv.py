@@ -19,19 +19,23 @@ COLUMNS = ("instruction", "input", "output")
 
 b_inst, e_inst = "[INST]", "[/INST]"
 
+# instruction = \
+# """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
+
+# Apply the following rules:
+# 1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
+# 2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
+# 3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
+# 4. Don't add ethnicity or gender to a non-human entity.
+# 5. Don't add ethnicity or gender to a specific individual name.
+# 6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
+# 7. Don't add, remove, or alter any words.
+
+# Send back # instead of the same prompt if no modifications are needed."""
+
 instruction = \
-"""You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
-
-Apply the following rules:
-1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
-2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
-3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
-4. Don't add ethnicity or gender to a non-human entity.
-5. Don't add ethnicity or gender to a specific individual name.
-6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
-7. Don't add, remove, or alter any words.
-
-Send back # instead of the same prompt if no modifications are needed."""
+"""Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
+Return an empty string if the text does not involve any person."""
 
 # instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation. Send back # instead of the same prompt if no modifications are needed."""
 
@@ -41,7 +45,7 @@ system_prompt = (
     f"{instruction}"
     "\n"
     "\n"
-    f"Prompt: {{prompt}}"
+    f"text: {{prompt}}"
     "\n"
     f" {e_inst} "
     "\n"
@@ -74,6 +78,7 @@ def prepare(
     test_split_fraction: float = 0.1,
     seed: int = 42,
     mask_inputs: bool = False,
+    to_lower: bool = False,
     ignore_index: int = -1,
     test_csv_path: Optional[Path] = None,
     max_seq_length: Optional[int] = None,
@@ -118,6 +123,7 @@ def prepare(
             max_length=max_seq_length,
             mask_inputs=mask_inputs,
             ignore_index=ignore_index,
+            to_lower=to_lower,
         )
         for sample in tqdm(train_set)
     ]
@@ -131,13 +137,17 @@ def prepare(
             max_length=max_seq_length,
             mask_inputs=mask_inputs,
             ignore_index=ignore_index,
+            to_lower=to_lower,
         )
         for sample in tqdm(test_set)
     ]
     torch.save(test_set, destination_path / "test.pt")
 
 
-def prepare_sample(example: dict, tokenizer: Tokenizer, max_length: int, mask_inputs: bool, ignore_index: int) -> dict:
+def prepare_sample(
+    example: dict, tokenizer: Tokenizer, max_length: int,
+    mask_inputs: bool, ignore_index: int, to_lower: bool
+) -> dict:
     """Processes a single sample.
 
     Each sample in the dataset consists of:
@@ -154,6 +164,10 @@ def prepare_sample(example: dict, tokenizer: Tokenizer, max_length: int, mask_in
     Finally, both the prompt and the label get tokenized. If desired, all tokens
     in the label that correspond to the original input prompt get masked out (default).
     """
+    if to_lower:
+        example['instruction'] = example['instruction'].lower()
+        example['input'] = example['input'].lower()
+        example['output'] = example['output'].lower()
     full_prompt = generate_prompt(example)
     full_prompt_and_response = full_prompt + example["output"]
     encoded_full_prompt = tokenizer.encode(full_prompt, max_length=max_length)

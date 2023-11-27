@@ -30,13 +30,13 @@ from scripts.prepare_csv import generate_prompt
 log_interval = 1
 devices = 1
 
-train_size = 31310  # v0.1a1: 31501
-val_size = 3480  # v0.1a1: 3505
+train_size = 1982  # v0.1a1: 31501
+val_size = 221  # v0.1a1: 3505
 
 # Hyperparameters
-num_epochs = 1
-learning_rate = 1e-4  # 3e-4
-batch_size = 128  # 128
+num_epochs = 3
+learning_rate = 2e-5  # 3e-4
+batch_size = 64  # 128
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
@@ -59,7 +59,7 @@ eval_interval = max(eval_interval, 1)
 # eval_interval = 10
 # save_interval = eval_interval
 # eval_iters = val_size // micro_batch_size
-eval_iters = 100  # 100
+eval_iters = 221  # val_size
 eval_max_new_tokens = 100
 
 hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str)) and not k.startswith("_")}
@@ -270,7 +270,8 @@ def validate(fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Toke
     with fabric.init_tensor():
         # do not set `max_seq_length=max_returned_token` because memory is not a concern here
         model.set_kv_cache(batch_size=1)
-    output = generate(model, encoded, max_returned_tokens=len(encoded) + eval_max_new_tokens, temperature=0.8, eos_id=tokenizer.eos_id)
+    output = generate(model, encoded, max_returned_tokens=len(encoded) + eval_max_new_tokens,
+                      temperature=0., top_k=1, eos_id=tokenizer.eos_id)
     model.clear_kv_cache()
     output = tokenizer.decode(output)
     fabric.print(output)
