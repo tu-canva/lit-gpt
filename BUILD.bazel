@@ -1,0 +1,35 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "lit_gpt",
+    srcs = glob([
+        "./**/*.py",
+    ]),
+    visibility = ["//ingredient_generation_server/models:__subpackages__"],
+    deps = [
+        # "//tools/build/python/lib/model_server",
+        # "//tools/build/python/lib/model_trainer",
+        "//tools/build/python/lib/auth",
+        "//tools/build/python/lib/logs",
+        "//tools/build/python/lib/secrets",
+        "//tools/build/python/lib/warehouse",
+        "@pypi_lightning//:pkg",
+    ],
+)
+
+py_test(
+    name = "unit-tests",
+    srcs = glob([
+        "tests/*.py",
+    ]),
+    main = "tests/test_full.py",
+    tags = [
+        "block-network",
+        "unit",
+    ],
+    deps = [
+        ":lit_gpt",
+        "@pypi_moto//:pkg",
+        "@pypi_pytest//:pkg",
+    ],
+)
