@@ -9,7 +9,9 @@ py_library(
         "//ingredient_generation_server/models:__subpackages__",
     ],
     deps = [
+        "@pypi_bitsandbytes//:pkg",
         "@pypi_pytorch_lightning//:pkg",
+        "@pypi_scipy//:pkg",
         "@pypi_sentencepiece//:pkg",
         "@pypi_torch//:pkg",
     ],
