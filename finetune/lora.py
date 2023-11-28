@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import time
@@ -10,6 +11,7 @@ from lightning.fabric.loggers import CSVLogger
 from lightning.fabric.plugins import BitsandbytesPrecision
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor
+from lightning.pytorch.loggers import WandbLogger
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -27,6 +29,7 @@ from lit_gpt.utils import (
 )
 from scripts.prepare_csv import generate_prompt
 
+use_wandb = True
 log_interval = 1
 devices = 1
 
@@ -98,9 +101,14 @@ def setup(
     else:
         strategy = "auto"
 
-    logger = CSVLogger(out_dir.parent, out_dir.name, flush_logs_every_n_steps=log_interval)
+    if use_wandb:
+        logger = WandbLogger(project="lora", name="training")
+    else:
+        logger = CSVLogger(out_dir.parent, out_dir.name, flush_logs_every_n_steps=log_interval)
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger, plugins=plugins)
     fabric.print(hparams)
+    if use_wandb:
+        logger.log_hyperparams(hparams)
     fabric.launch(main, data_dir, checkpoint_dir, out_dir)
 
 
@@ -192,6 +200,7 @@ def train(
     total_lengths = 0
     total_t0 = time.perf_counter()
     best_val_loss = 100.
+    initial_iter = 0
 
     for iter_num in range(1, max_iters + 1):
         if step_count <= warmup_steps:
@@ -221,12 +230,25 @@ def train(
 
         total_lengths += input_ids.numel()
         if iter_num % log_interval == 0:
+            metrics = {
+                "loss": loss,
+                "iter": iter_num,
+                "step": step_count,
+                "iter_time": t1 - iter_t0,
+                "remaining_time": (
+                    (t1 - total_t0) / (iter_num - initial_iter) * (max_iters - iter_num)
+                ),
+                "tokens": iter_num * micro_batch_size * model.config.block_size,
+                "total_tokens": iter_num * micro_batch_size * model.config.block_size * fabric.world_size,
+            }
+
             loss_item = loss.item()  # expensive device-to-host synchronization
             t1 = time.perf_counter()
             throughput.update(
                 time=t1 - total_t0, batches=iter_num, samples=iter_num * micro_batch_size, lengths=total_lengths
             )
-            throughput.compute_and_log(step=iter_num)
+            throughput_metrics = throughput.compute_and_log(step=iter_num)
+            metrics.update(throughput_metrics)
             fabric.print(
                 f"iter {iter_num} step {step_count}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f}ms{' (optimizer.step)' if not is_accumulating else ''}"
@@ -235,14 +257,17 @@ def train(
         if not is_accumulating and step_count % eval_interval == 0:
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_data, tokenizer, max_iters=eval_iters)
+            val_loss = val_loss.item()
             t1 = time.perf_counter() - t0
             fabric.print(
-                f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms, best val loss {best_val_loss:.4f}"
-                f"{'. Lets save the best model...' if best_val_loss > val_loss.item() else ''}"
+                f"step {iter_num}: val loss {val_loss:.4f}, val time: {t1 * 1000:.2f}ms, best val loss {best_val_loss:.4f}"
+                f"{'. Lets save the best model...' if best_val_loss > val_loss else ''}"
             )
+            metrics = {"val_loss": val_loss, "val_ppl": math.exp(val_loss)}
+            fabric.log_dict(metrics, step=iter_num)
             fabric.barrier()
-            if best_val_loss > val_loss.item():
-                best_val_loss = val_loss.item()
+            if best_val_loss > val_loss:
+                best_val_loss = val_loss
                 # checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
                 checkpoint_path = out_dir / "lit_model_lora_finetuned.pth"
                 save_lora_checkpoint(fabric, model, checkpoint_path)    
