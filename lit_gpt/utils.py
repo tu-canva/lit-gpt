@@ -7,12 +7,13 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, ContextManager, Dict, List, Mapping, Optional, TypeVar, Union
 
-import lightning as L
+# import pytorch_lightning as L
 import torch
 import torch.nn as nn
 import torch.utils._device
-from lightning.fabric.strategies import FSDPStrategy
-from lightning.fabric.utilities.load import _lazy_load as lazy_load
+import lightning_fabric as lf
+from lightning_fabric.strategies import FSDPStrategy
+from lightning_fabric.utilities.load import _lazy_load as lazy_load
 from torch.serialization import normalize_storage_type
 
 if TYPE_CHECKING:
@@ -298,14 +299,14 @@ def get_default_supported_precision(training: bool) -> str:
     Returns:
         default precision that is suitable for the task and is supported by the hardware
     """
-    from lightning.fabric.accelerators import MPSAccelerator
+    from lightning_fabric.accelerators import MPSAccelerator
 
     if MPSAccelerator.is_available() or (torch.cuda.is_available() and not torch.cuda.is_bf16_supported()):
         return "16-mixed" if training else "16-true"
     return "bf16-mixed" if training else "bf16-true"
 
 
-def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
+def load_checkpoint(fabric: lf.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
     if isinstance(fabric.strategy, FSDPStrategy):
         fabric.load_raw(checkpoint_path, model, strict=strict)
     else:

@@ -7,8 +7,8 @@ from typing import Any, Literal, Optional, Type, Union
 import torch
 from typing_extensions import Self
 
-import lit_gpt.model
-from lit_gpt.utils import find_multiple
+from . import model
+from .utils import find_multiple
 
 
 @dataclass
@@ -116,13 +116,13 @@ class Config:
     @property
     def mlp_class(self) -> Type:
         # `self._mlp_class` cannot be the type to keep the config json serializable
-        return getattr(lit_gpt.model, self._mlp_class)
+        return getattr(model, self._mlp_class)
 
     @property
     def norm_class(self) -> Type:
         # `self._norm_class` cannot be the type to keep the config json serializable
         if self._norm_class == "RMSNorm":
-            from lit_gpt.rmsnorm import RMSNorm
+            from .rmsnorm import RMSNorm
 
             return RMSNorm
         return getattr(torch.nn, self._norm_class)

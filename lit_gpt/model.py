@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from typing_extensions import Self
 
-from lit_gpt.config import Config
+from .config import Config
 
 
 class GPT(nn.Module):

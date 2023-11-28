@@ -1,19 +1,17 @@
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
 py_library(
-    name = "lit_gpt",
+    name = "lgpt",
     srcs = glob([
-        "./**/*.py",
+        "lit_gpt/**/*.py",
     ]),
-    visibility = ["//ingredient_generation_server/models:__subpackages__"],
+    visibility = [
+        "//ingredient_generation_server/models:__subpackages__",
+    ],
     deps = [
-        # "//tools/build/python/lib/model_server",
-        # "//tools/build/python/lib/model_trainer",
-        "//tools/build/python/lib/auth",
-        "//tools/build/python/lib/logs",
-        "//tools/build/python/lib/secrets",
-        "//tools/build/python/lib/warehouse",
-        "@pypi_lightning//:pkg",
+        "@pypi_pytorch_lightning//:pkg",
+        "@pypi_sentencepiece//:pkg",
+        "@pypi_torch//:pkg",
     ],
 )
 
@@ -28,7 +26,7 @@ py_test(
         "unit",
     ],
     deps = [
-        ":lit_gpt",
+        ":lgpt",
         "@pypi_moto//:pkg",
         "@pypi_pytest//:pkg",
     ],
