@@ -7,7 +7,8 @@ datasets                # quantize/gptq.py
 zstandard               # scripts/prepare_redpajama.py, scripts/prepare_starcoder.py
 pandas                  # scripts/prepare_csv.py, scripts/prepare_starcoder.py
 pyarrow                 # scripts/prepare_starcoder.py
+tensorboard             # pretrain/tinyllama.py
 # eval
-git+https://github.com/EleutherAI/lm-evaluation-harness.git@master
+git+https://github.com/EleutherAI/lm-evaluation-harness.git@115206dc89dad67b8beaa90051fb52db77f0a529
 # scripts/prepare_slimpajama.py, scripts/prepare_starcoder.py, pretrain/tinyllama.py
-lightning @ git+https://github.com/Lightning-AI/lightning@532c723c8584903dc719458d0ad52861d51bc395#egg=lightning[data]
+lightning[data] @ git+https://github.com/Lightning-AI/lightning@6cbe9ceb560d798892bdae9186291acf9bf5d2e3

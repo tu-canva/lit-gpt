@@ -1,18 +1,26 @@
 import sys
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import torch
+from conftest import RunIf
 from lightning import Fabric
+
+# support running without installing as a package
+wd = Path(__file__).parent.parent.resolve()
+sys.path.append(str(wd))
+
+import lit_gpt.config as config_module
 
 
 def test_config_identical():
     import lit_gpt.adapter_v2 as gpt_adapter
     import lit_gpt.model as gpt
 
-    name = "pythia-70m"
+    name = "pythia-14m"
     with Fabric(accelerator="cpu").init_module(empty_init=True):
         base_model = gpt.GPT.from_name(name)
         adapter_model = gpt_adapter.GPT.from_name(name)
@@ -27,7 +35,7 @@ def test_adapter_v2_filter(tmp_path):
     from lit_gpt.adapter_v2 import GPT, adapter_filter
 
     fabric = Fabric(devices=1)
-    model = GPT.from_name("pythia-70m", n_layer=3)
+    model = GPT.from_name("pythia-14m", n_layer=3)
     save_path = tmp_path / "model.pth"
     fabric.save(save_path, {"model": model}, filter={"model": adapter_filter})
     saved = torch.load(save_path)["model"]
@@ -121,26 +129,28 @@ def test_adapter_v2_gpt_init_weights():
         assert (param == 0).all()
 
 
-def test_base_model_can_be_adapter_v2_loaded():
+@pytest.mark.parametrize("name", [c["name"] for c in config_module.configs])
+def test_base_model_can_be_adapter_v2_loaded(name):
     from lit_gpt.adapter_v2 import GPT as AdapterV2GPT
     from lit_gpt.adapter_v2 import adapter_filter
     from lit_gpt.model import GPT as BaseGPT
 
-    base_model = BaseGPT.from_name("pythia-70m", bias=True, n_layer=2)
+    kwargs = {"n_layer": 2, "n_head": 8, "n_embd": 16, "padded_vocab_size": 32}
+    base_model = BaseGPT.from_name(name, **kwargs)
     base_model_state_dict = base_model.state_dict()
-    lora_model = AdapterV2GPT.from_name("pythia-70m", bias=True, n_layer=2, adapter_start_layer=0)
+    lora_model = AdapterV2GPT.from_name(name, **kwargs, adapter_start_layer=0)
     keys = lora_model.load_state_dict(base_model_state_dict, strict=False)
     assert not keys.unexpected_keys
     for k in keys.missing_keys:
         assert adapter_filter(k, None)
 
 
-@pytest.mark.skipif(sys.platform in ("win32", "darwin"), reason="torch.compile not supported on this platform")
+@RunIf(dynamo=True)
 @torch.inference_mode()
 def test_adapter_v2_compile():
     from lit_gpt.adapter_v2 import GPT
 
-    model = GPT.from_name("pythia-70m", n_layer=3)
+    model = GPT.from_name("pythia-14m", n_layer=3)
     x = torch.randint(model.config.vocab_size, size=(2, model.config.block_size), dtype=torch.int64)
 
     from torch._dynamo.backends import debugging

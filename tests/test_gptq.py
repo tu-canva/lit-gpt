@@ -1,10 +1,10 @@
 import lightning as L
 import pytest
 import torch
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_2
+from conftest import RunIf
 
 
-@pytest.mark.skipif(_TORCH_GREATER_EQUAL_2_2, reason="Core dumped")
+@RunIf(max_torch="2.2")  # TODO: core dumped
 def test_gptq_blockwise_quantization():
     from quantize.gptq import _TRITON_AVAILABLE
 
@@ -15,7 +15,7 @@ def test_gptq_blockwise_quantization():
 
     fabric = L.Fabric(devices=1)
     with fabric.init_module(empty_init=False):
-        model = GPT.from_name("pythia-70m", n_layer=2)
+        model = GPT.from_name("pythia-14m", n_layer=2)
         x = torch.randint(0, 10, (2, model.config.block_size))
 
     from quantize.gptq import blockwise_quantization

@@ -44,6 +44,7 @@ micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
 max_iters = num_epochs * (train_size // micro_batch_size)
+max_seq_length = None  # assign value to truncate
 weight_decay = 0.01
 lora_r = 256  # 256
 lora_alpha = 512  # 512
@@ -188,6 +189,7 @@ def train(
     longest_seq_length, longest_seq_ix = get_longest_seq_length(train_data)
     val_longest_seq_length, _ = get_longest_seq_length(val_data)
     model.max_seq_length = max(longest_seq_length, val_longest_seq_length) + eval_max_new_tokens
+    # model.max_seq_length = min(longest_seq_length, max_seq_length or float("inf"))
     fabric.print(
         f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
         f" {model.max_seq_length} and context length is {model.config.block_size}"
@@ -326,6 +328,11 @@ def get_batch(
 
     x = torch.stack([pad_right(x, pad_id=0) for x in input_ids])
     y = torch.stack([pad_right(x, pad_id=-1) for x in labels])
+
+    # Truncate if needed
+    if max_seq_length:
+        x = x[:, :max_seq_length]
+        y = y[:, :max_seq_length]
 
     if fabric.device.type == "cuda" and x.device.type == "cpu":
         x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
