@@ -14,53 +14,10 @@ logger = logging.getLogger(__name__)
 sys.path.append(str(wd))
 
 from lit_gpt.tokenizer import Tokenizer
+from chat.base import prompt_config
 
-COLUMNS = ("instruction", "input", "output")
-
-b_inst, e_inst = "[INST]", "[/INST]"
-
-# instruction = \
-# """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
-
-# Apply the following rules:
-# 1. Add a random gender to each person or each group if the gender is unspecified, otherwise keep it unchanged.
-# 2. Add a random ethnicity to each person or each group if the ethnicity is unspecified, otherwise keep it unchanged.
-# 3. Explicitly specify the gender and/or ethnicity, not abstractly reference them.
-# 4. Don't add ethnicity or gender to a non-human entity.
-# 5. Don't add ethnicity or gender to a specific individual name.
-# 6. Don't add ethnicity or gender if the prompt is vague, without any specified individual or a group.
-# 7. Don't add, remove, or alter any words.
-
-# Send back # instead of the same prompt if no modifications are needed."""
-
-instruction = \
-"""Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
-Return an empty string if the text does not involve any person."""
-
-# instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation. Send back # instead of the same prompt if no modifications are needed."""
-
-system_prompt = (
-    f" {b_inst} "
-    "\n"
-    f"{instruction}"
-    "\n"
-    "\n"
-    f"text: {{prompt}}"
-    "\n"
-    f" {e_inst} "
-    "\n"
-)
-# system_prompt = (
-#     "Below is an instruction that describes a task, paired with an input that provides further context. "
-#     "Write a response that appropriately completes the request.\n\n"
-#     "### Instruction:\n"
-#     f"{instruction}\n"
-#     "\n"
-#     "### Input:\n"
-#     f"{{prompt}}\n"
-#     "\n"
-#     "### Response:"
-# )
+# COLUMNS = ("instruction", "input", "output")
+COLUMNS = ("input", "output")
 
 
 def csv2dataset(csv_path):
@@ -101,6 +58,9 @@ def prepare(
     print("Loading tokenizer...")
     tokenizer = Tokenizer(checkpoint_dir)
 
+    system_prompt, _ = prompt_config(checkpoint_dir, tokenizer)
+    print(system_prompt.format(prompt="Just a prompt example."))
+
     if test_csv_path is None:
         # Partition the dataset into train and test
         train_set, test_set = random_split(
@@ -118,6 +78,7 @@ def prepare(
     print("Processing train split ...")
     train_set = [
         prepare_sample(
+            system_prompt=system_prompt,
             example=sample,
             tokenizer=tokenizer,
             max_length=max_seq_length,
@@ -132,6 +93,7 @@ def prepare(
     print("Processing test split ...")
     test_set = [
         prepare_sample(
+            system_prompt=system_prompt,
             example=sample,
             tokenizer=tokenizer,
             max_length=max_seq_length,
@@ -145,6 +107,7 @@ def prepare(
 
 
 def prepare_sample(
+    system_prompt: str,
     example: dict, tokenizer: Tokenizer, max_length: int,
     mask_inputs: bool, ignore_index: int, to_lower: bool
 ) -> dict:
@@ -165,10 +128,9 @@ def prepare_sample(
     in the label that correspond to the original input prompt get masked out (default).
     """
     if to_lower:
-        example['instruction'] = example['instruction'].lower()
         example['input'] = example['input'].lower()
         example['output'] = example['output'].lower()
-    full_prompt = generate_prompt(example)
+    full_prompt = generate_prompt(system_prompt, example)
     full_prompt_and_response = full_prompt + example["output"]
     encoded_full_prompt = tokenizer.encode(full_prompt, max_length=max_length)
     encoded_full_prompt_and_response = tokenizer.encode(full_prompt_and_response, eos=True, max_length=max_length)
@@ -186,7 +148,7 @@ def prepare_sample(
     }
 
 
-def generate_prompt(example: dict) -> str:
+def generate_prompt(system_prompt:str, example: dict) -> str:
     """Generates a standardized message to prompt the model with an instruction, optional input and a
     'response' field."""
 

@@ -356,7 +356,22 @@ Return an empty string if the text does not involve any person."""
         return system_prompt, stop_tokens
 
     if re.search("phi", checkpoint_name):
-        system_prompt = "{prompt}\n\nAnswer:"
+        instruction = \
+"""Extract a list of human descriptions from the text delimited by triple backticks. Desired description format for each person: < |ethnicity| [gender] {{identity}} >.
+Return an empty string if the text does not involve any person."""
+
+        system_prompt = (
+            f"{instruction}"
+            "\n"
+            "```"
+            "\n"
+            f"{{prompt}}"
+            "\n"
+            "```"
+            "\n"
+            "\n"
+            f"Answer:"
+        )
 
         stop_tokens = (
             [tokenizer.eos_id],

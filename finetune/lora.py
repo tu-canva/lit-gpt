@@ -2,6 +2,7 @@ import math
 import os
 import sys
 import time
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -17,6 +18,7 @@ from lightning.pytorch.loggers import WandbLogger
 wd = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(wd))
 
+from chat.base import prompt_config
 from generate.base import generate
 from lit_gpt.lora import GPT, Block, Config, lora_filter, mark_only_lora_as_trainable
 from lit_gpt.tokenizer import Tokenizer
@@ -39,7 +41,7 @@ val_size = 221  # v0.1a1: 3505
 # Hyperparameters
 num_epochs = 3
 learning_rate = 2e-5  # 3e-4
-batch_size = 64  # 128
+batch_size = 64  # 64
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
@@ -60,7 +62,6 @@ warmup_steps = (max_iters // gradient_accumulation_iters) // 10  # 0.1 * num_ste
 num_evals = 100
 eval_interval = (max_iters // gradient_accumulation_iters) // num_evals  # num_steps // num_evals
 eval_interval = max(eval_interval, 1)
-# eval_interval = 10
 # save_interval = eval_interval
 # eval_iters = val_size // micro_batch_size
 eval_iters = 221  # val_size
@@ -103,7 +104,7 @@ def setup(
         strategy = "auto"
 
     if use_wandb:
-        logger = WandbLogger(project="lora", name="training")
+        logger = WandbLogger(project="prompt-modify", name=out_dir.name)
     else:
         logger = CSVLogger(out_dir.parent, out_dir.name, flush_logs_every_n_steps=log_interval)
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger, plugins=plugins)
@@ -186,6 +187,7 @@ def train(
     out_dir: Path,
 ) -> None:
     tokenizer = Tokenizer(checkpoint_dir)
+    system_prompt, _ = prompt_config(checkpoint_dir, tokenizer)
     longest_seq_length, longest_seq_ix = get_longest_seq_length(train_data)
     val_longest_seq_length, _ = get_longest_seq_length(val_data)
     model.max_seq_length = max(longest_seq_length, val_longest_seq_length) + eval_max_new_tokens
@@ -195,7 +197,7 @@ def train(
         f" {model.max_seq_length} and context length is {model.config.block_size}"
     )
 
-    validate(fabric, model, val_data, tokenizer, max_iters=2)  # sanity check
+    validate(system_prompt, fabric, model, val_data, tokenizer, max_iters=2)  # sanity check
 
     throughput = ThroughputMonitor(fabric, window_size=50)
     step_count = 0
@@ -210,10 +212,14 @@ def train(
             lr = learning_rate * step_count / warmup_steps
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
+            fabric.log_dict({"learning-rate": lr}, step=step_count)
 
         iter_t0 = time.perf_counter()
 
         input_ids, targets = get_batch(fabric, train_data, longest_seq_ix if iter_num == 1 else None)
+        if iter_num == 1:  # print input, output to double-check
+            fabric.print("INPUT:", tokenizer.decode(input_ids[0]))
+            fabric.print("OUTPUT:", tokenizer.decode(targets[0]))
 
         is_accumulating = iter_num % gradient_accumulation_iters != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
@@ -228,10 +234,12 @@ def train(
             optimizer.zero_grad()
             if step_count > warmup_steps:
                 scheduler.step()
+                fabric.log_dict({"learning-rate": np.mean(scheduler.get_last_lr())}, step=step_count)
             step_count += 1
 
         total_lengths += input_ids.numel()
         if iter_num % log_interval == 0:
+            t1 = time.perf_counter()
             metrics = {
                 "loss": loss,
                 "iter": iter_num,
@@ -255,10 +263,12 @@ def train(
                 f"iter {iter_num} step {step_count}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f}ms{' (optimizer.step)' if not is_accumulating else ''}"
             )
+            fabric.log_dict(metrics, step=iter_num)
 
         if not is_accumulating and step_count % eval_interval == 0:
             t0 = time.perf_counter()
-            val_loss = validate(fabric, model, val_data, tokenizer, max_iters=eval_iters)
+            val_loss = validate(system_prompt, fabric, model, val_data, tokenizer,
+                                max_iters=eval_iters)
             val_loss = val_loss.item()
             t1 = time.perf_counter() - t0
             fabric.print(
@@ -280,7 +290,11 @@ def train(
 
 # FSDP has issues with `inference_mode`
 @torch.no_grad()
-def validate(fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Tokenizer, max_iters: int) -> torch.Tensor:
+def validate(
+    system_prompt: str,
+    fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Tokenizer,
+    max_iters: int
+) -> torch.Tensor:
     fabric.print("Validating ...")
     model.eval()
     losses = torch.zeros(max_iters)
@@ -292,7 +306,7 @@ def validate(fabric: L.Fabric, model: GPT, val_data: List[Dict], tokenizer: Toke
 
     # produce an example:
     sample = {"input": "a photo of a ML engineer"}
-    prompt = generate_prompt(sample)
+    prompt = generate_prompt(system_prompt, sample)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     with fabric.init_tensor():
         # do not set `max_seq_length=max_returned_token` because memory is not a concern here
