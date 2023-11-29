@@ -1,3 +1,6 @@
+import re
+import logging
+
 from .model import GPT
 from .config import Config
 from .tokenizer import Tokenizer
@@ -10,6 +13,10 @@ from lightning_utilities.core.imports import RequirementCache
 #         "Lit-GPT requires lightning nightly. Please run:\n"
 #         f" pip uninstall -y lightning; pip install -r requirements.txt\n{str(_LIGHTNING_AVAILABLE)}"
 #     )
+
+# Suppress excessive warnings, see https://github.com/pytorch/pytorch/issues/111632
+pattern = re.compile(".*Profiler function .* will be ignored")
+logging.getLogger("torch._dynamo.variables.torch").addFilter(lambda record: not pattern.search(record.getMessage()))
 
 
 __all__ = ["GPT", "Config", "Tokenizer"]

@@ -12,7 +12,7 @@ from typing import Tuple, Union
 import lightning as L
 import torch
 import torch.nn as nn
-from lightning.fabric.loggers import CSVLogger
+from lightning.fabric.loggers import CSVLogger, TensorBoardLogger
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities.throughput import ThroughputMonitor, measure_flops
 from lightning.pytorch.loggers import WandbLogger
@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
 
-from lit_gpt.model import GPT, Block, Config, LLaMAMLP
+from lit_gpt.model import GPT, Block, CausalSelfAttention, Config, LLaMAMLP
 from lit_gpt.packed_dataset import CombinedDataset
 from lit_gpt.utils import chunked_cross_entropy, num_parameters
 
@@ -30,7 +30,7 @@ from lit_gpt.utils import chunked_cross_entropy, num_parameters
 model_name = "tiny-llama-1.1b"
 name = "lit-tiny-llama-1.1b"
 out_dir = Path("out") / name
-use_wandb = False
+logger_name = "tensorboard"
 
 # Hyperparameters
 devices = 8
@@ -38,9 +38,9 @@ devices = 8
 global_batch_size = 512
 learning_rate = 4e-4
 micro_batch_size = 8
-max_steps = 715256 * 2
+max_tokens = int(3e12)  # 3 trillion
 warmup_steps = 2000
-log_step_interval = 2
+log_step_interval = 1
 eval_iters = 100
 save_step_interval = 1000
 eval_step_interval = 1000
@@ -56,9 +56,6 @@ batch_size = global_batch_size // devices
 gradient_accumulation_steps = batch_size // micro_batch_size
 assert gradient_accumulation_steps > 0
 warmup_iters = warmup_steps * gradient_accumulation_steps
-
-max_iters = max_steps * gradient_accumulation_steps
-lr_decay_iters = max_iters
 log_iter_interval = log_step_interval * gradient_accumulation_steps
 
 
@@ -66,10 +63,7 @@ hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str))
 
 
 def setup(resume: Union[bool, Path] = False):
-    if use_wandb:
-        logger = WandbLogger(project="tinyllama", name="training", resume=(resume is not False))
-    else:
-        logger = CSVLogger(root_dir="logs", name="tinyllama")
+    logger = choose_logger(logger_name, name=name, resume=resume)
 
     if devices > 1:
         strategy = FSDPStrategy(
@@ -78,6 +72,7 @@ def setup(resume: Union[bool, Path] = False):
             state_dict_type="full",
             limit_all_gathers=True,
             cpu_offload=False,
+            sharding_strategy="HYBRID_SHARD",
         )
     else:
         strategy = "auto"
@@ -86,8 +81,8 @@ def setup(resume: Union[bool, Path] = False):
     fabric.launch()
 
     fabric.print(hparams)
-    if use_wandb:
-        logger.log_hyperparams(hparams)
+    if logger_name in ("tensorboard", "wandb"):
+        fabric.logger.log_hyperparams(hparams)
 
     main(fabric, resume)
 
@@ -107,7 +102,7 @@ def main(fabric, resume):
     t0 = time.perf_counter()
     with fabric.init_module(empty_init=False):
         model = GPT(config)
-        model.apply(partial(init_weights, n_layer=config.n_layer))
+        model.apply(partial(init_weights, n_layer=config.n_layer, n_embd=config.n_embd))
 
     fabric.print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
     fabric.print(f"Total parameters: {num_parameters(model):,}")
@@ -150,31 +145,34 @@ def train(fabric, state, train_dataloader, val_dataloader, resume):
         fabric.print(f"Measured TFLOPs: {measured_flops * fabric.world_size / 1e12:.2f}")
         del meta_model, x
 
+    max_tokens_per_device = max_tokens // fabric.world_size
+    tokens_per_iter = micro_batch_size * model.config.block_size
+    max_iters = max_tokens_per_device // tokens_per_iter
+
     total_t0 = time.perf_counter()
     initial_iter = state["iter_num"]
     curr_iter = 0
 
     for train_data in train_dataloader:
+        if state["iter_num"] >= max_iters:
+            break
+
         # resume data loader state by fast-forwarding through all seen batches
         # drop this once streaming dataset supports proper resuming
         if resume:
             if curr_iter < initial_iter:
                 curr_iter += 1
                 continue
-            else:
-                resume = False
-                curr_iter = -1
-                fabric.barrier()
-                fabric.print(
-                    "Resuming data loader finished."
-                    f"Took {time.perf_counter() - total_t0:.1f} seconds to reach iteration {initial_iter}."
-                )
-
-        if state["iter_num"] >= max_iters:
-            break
+            resume = False
+            curr_iter = -1
+            fabric.barrier()
+            fabric.print(
+                "Resuming data loader finished."
+                f"Took {time.perf_counter() - total_t0:.1f} seconds to reach iteration {initial_iter}."
+            )
 
         # determine and set the learning rate for this iteration
-        lr = get_lr(state["iter_num"]) if decay_lr else learning_rate
+        lr = get_lr(state["iter_num"], max_iters) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
@@ -303,7 +301,7 @@ def create_dataloaders(batch_size: int, block_size: int) -> Tuple[DataLoader, Da
 
 
 # learning rate decay scheduler (cosine with warmup)
-def get_lr(it):
+def get_lr(it: int, lr_decay_iters: int) -> int:
     # 1) linear warmup for warmup_iters steps
     if it < warmup_iters:
         return learning_rate * it / warmup_iters
@@ -317,17 +315,27 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-def init_weights(module: nn.Module, n_layer: int):
+def init_weights(module: nn.Module, n_layer: int, n_embd: int):
     # Follows GPT-NeoX: https://arxiv.org/abs/2204.06745
     if isinstance(module, nn.Embedding):
-        nn.init.normal_(module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / module.weight.shape[1]))
+        nn.init.normal_(module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / n_embd))
     elif isinstance(module, nn.Linear):
-        nn.init.normal_(module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / module.weight.shape[1]))
+        nn.init.normal_(module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / n_embd))
         if module.bias is not None:
             nn.init.zeros_(module.bias)
     for name, param in module.named_parameters():
-        if name == "proj.weight" and isinstance(module, LLaMAMLP):
-            nn.init.normal_(param, mean=0.0, std=(1 / math.sqrt(param.shape[-1]) / n_layer))
+        if name == "proj.weight" and isinstance(module, (LLaMAMLP, CausalSelfAttention)):
+            nn.init.normal_(param, mean=0.0, std=(1 / math.sqrt(n_embd) / n_layer))
+
+
+def choose_logger(logger_name: str, name: str, resume: Union[bool, Path], *args, **kwargs):
+    if logger_name == "csv":
+        return CSVLogger(root_dir="logs", name=name, *args, **kwargs)
+    if logger_name == "tensorboard":
+        return TensorBoardLogger(root_dir="logs", name=name, *args, **kwargs)
+    if logger_name == "wandb":
+        return WandbLogger(project="tinyllama", name=name, resume=(resume is not False), *args, **kwargs)
+    raise ValueError(f"`logger={logger_name}` is not a valid option.")
 
 
 if __name__ == "__main__":

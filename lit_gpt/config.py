@@ -88,7 +88,10 @@ class Config:
     def from_name(cls, name: str, **kwargs: Any) -> Self:
         if name not in name_to_config:
             # search through all `config['hf_config']['name']`
-            conf_dict = next(config for config in configs if name == config["hf_config"]["name"])
+            try:
+                conf_dict = next(config for config in configs if name == config["hf_config"]["name"])
+            except StopIteration:
+                raise ValueError(f"{name!r} is not a supported config name")
         else:
             conf_dict = name_to_config[name]
 
@@ -112,6 +115,15 @@ class Config:
             kwargs["hf_config"] = {"name": kwargs.get("name", json_kwargs["name"]), "org": kwargs.pop("org")}
         json_kwargs.update(kwargs)
         return cls(**json_kwargs)
+
+    @classmethod
+    def from_checkpoint(cls, path: Path, **kwargs: Any) -> Self:
+        """Automatically load `lit_config.json` and if it doesn't exist - a matching config from `lit_gpt/config.py`."""
+        if (config_path := path / "lit_config.json").is_file():
+            return cls.from_json(config_path, **kwargs)
+        if (model_name := path.name) in name_to_config:
+            return cls.from_name(model_name, **kwargs)
+        raise FileNotFoundError(f"For {str(path)!r} neither 'lit_config.json' nor matching config exists.")
 
     @property
     def mlp_class(self) -> Type:
@@ -158,6 +170,26 @@ configs = [
 # EleutherAI Pythia
 ####################
 pythia = [
+    # https://huggingface.co/EleutherAI/pythia-14m/blob/main/config.json
+    dict(
+        name="pythia-14m",
+        hf_config=dict(org="EleutherAI", name="pythia-14m"),
+        block_size=512,
+        n_layer=6,
+        n_embd=128,
+        n_head=4,
+        padding_multiple=128,
+    ),
+    # https://huggingface.co/EleutherAI/pythia-31m/blob/main/config.json
+    dict(
+        name="pythia-31m",
+        hf_config=dict(org="EleutherAI", name="pythia-31m"),
+        block_size=1024,
+        n_layer=6,
+        n_embd=256,
+        n_head=8,
+        padding_multiple=128,
+    ),
     # https://huggingface.co/EleutherAI/pythia-70m/blob/main/config.json
     dict(
         name="pythia-70m",
@@ -236,6 +268,9 @@ pythia = [
 ]
 configs.extend(pythia)
 for c in pythia:
+    # "pythia-14m" and "pythia-31m" don't have deduped version
+    if c["name"] in ("pythia-14m", "pythia-31m"):
+        continue
     copy = deepcopy(c)
     copy["name"] = f"{c['name']}-deduped"
     copy["hf_config"]["name"] = f"{c['hf_config']['name']}-deduped"
@@ -1140,7 +1175,7 @@ for c in mistral:
 tiny_llama = [
     dict(
         name="tiny-llama-1.1b",
-        hf_config=dict(org="PY007", name="TinyLlama-1.1B-intermediate-step-480k-1T"),
+        hf_config=dict(org="TinyLlama", name="TinyLlama-1.1B-intermediate-step-955k-token-2T"),
         block_size=2048,
         vocab_size=32000,
         padding_multiple=64,

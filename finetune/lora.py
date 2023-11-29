@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import time
@@ -10,6 +11,7 @@ from lightning.fabric.loggers import CSVLogger
 from lightning.fabric.plugins import BitsandbytesPrecision
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor
+from lightning.pytorch.loggers import WandbLogger
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -27,6 +29,7 @@ from lit_gpt.utils import (
 )
 from scripts.prepare_csv import generate_prompt
 
+use_wandb = True
 log_interval = 1
 devices = 1
 
@@ -41,6 +44,7 @@ micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
 max_iters = num_epochs * (train_size // micro_batch_size)
+max_seq_length = None  # assign value to truncate
 weight_decay = 0.01
 lora_r = 256  # 256
 lora_alpha = 512  # 512
@@ -98,9 +102,14 @@ def setup(
     else:
         strategy = "auto"
 
-    logger = CSVLogger(out_dir.parent, out_dir.name, flush_logs_every_n_steps=log_interval)
+    if use_wandb:
+        logger = WandbLogger(project="lora", name="training")
+    else:
+        logger = CSVLogger(out_dir.parent, out_dir.name, flush_logs_every_n_steps=log_interval)
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger, plugins=plugins)
     fabric.print(hparams)
+    if use_wandb:
+        logger.log_hyperparams(hparams)
     fabric.launch(main, data_dir, checkpoint_dir, out_dir)
 
 
@@ -180,6 +189,7 @@ def train(
     longest_seq_length, longest_seq_ix = get_longest_seq_length(train_data)
     val_longest_seq_length, _ = get_longest_seq_length(val_data)
     model.max_seq_length = max(longest_seq_length, val_longest_seq_length) + eval_max_new_tokens
+    # model.max_seq_length = min(longest_seq_length, max_seq_length or float("inf"))
     fabric.print(
         f"The longest sequence length in the train data is {longest_seq_length}, the model's maximum sequence length is"
         f" {model.max_seq_length} and context length is {model.config.block_size}"
@@ -192,6 +202,7 @@ def train(
     total_lengths = 0
     total_t0 = time.perf_counter()
     best_val_loss = 100.
+    initial_iter = 0
 
     for iter_num in range(1, max_iters + 1):
         if step_count <= warmup_steps:
@@ -221,12 +232,25 @@ def train(
 
         total_lengths += input_ids.numel()
         if iter_num % log_interval == 0:
+            metrics = {
+                "loss": loss,
+                "iter": iter_num,
+                "step": step_count,
+                "iter_time": t1 - iter_t0,
+                "remaining_time": (
+                    (t1 - total_t0) / (iter_num - initial_iter) * (max_iters - iter_num)
+                ),
+                "tokens": iter_num * micro_batch_size * model.config.block_size,
+                "total_tokens": iter_num * micro_batch_size * model.config.block_size * fabric.world_size,
+            }
+
             loss_item = loss.item()  # expensive device-to-host synchronization
             t1 = time.perf_counter()
             throughput.update(
                 time=t1 - total_t0, batches=iter_num, samples=iter_num * micro_batch_size, lengths=total_lengths
             )
-            throughput.compute_and_log(step=iter_num)
+            throughput_metrics = throughput.compute_and_log(step=iter_num)
+            metrics.update(throughput_metrics)
             fabric.print(
                 f"iter {iter_num} step {step_count}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f}ms{' (optimizer.step)' if not is_accumulating else ''}"
@@ -235,14 +259,17 @@ def train(
         if not is_accumulating and step_count % eval_interval == 0:
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_data, tokenizer, max_iters=eval_iters)
+            val_loss = val_loss.item()
             t1 = time.perf_counter() - t0
             fabric.print(
-                f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms, best val loss {best_val_loss:.4f}"
-                f"{'. Lets save the best model...' if best_val_loss > val_loss.item() else ''}"
+                f"step {iter_num}: val loss {val_loss:.4f}, val time: {t1 * 1000:.2f}ms, best val loss {best_val_loss:.4f}"
+                f"{'. Lets save the best model...' if best_val_loss > val_loss else ''}"
             )
+            metrics = {"val_loss": val_loss, "val_ppl": math.exp(val_loss)}
+            fabric.log_dict(metrics, step=iter_num)
             fabric.barrier()
-            if best_val_loss > val_loss.item():
-                best_val_loss = val_loss.item()
+            if best_val_loss > val_loss:
+                best_val_loss = val_loss
                 # checkpoint_path = out_dir / f"iter-{iter_num:06d}-ckpt.pth"
                 checkpoint_path = out_dir / "lit_model_lora_finetuned.pth"
                 save_lora_checkpoint(fabric, model, checkpoint_path)    
@@ -301,6 +328,11 @@ def get_batch(
 
     x = torch.stack([pad_right(x, pad_id=0) for x in input_ids])
     y = torch.stack([pad_right(x, pad_id=-1) for x in labels])
+
+    # Truncate if needed
+    if max_seq_length:
+        x = x[:, :max_seq_length]
+        y = y[:, :max_seq_length]
 
     if fabric.device.type == "cuda" and x.device.type == "cpu":
         x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
