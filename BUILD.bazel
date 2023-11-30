@@ -13,6 +13,7 @@ py_library(
         "@pypi_pytorch_lightning//:pkg",
         "@pypi_scipy//:pkg",
         "@pypi_sentencepiece//:pkg",
+        "@pypi_tokenizers//:pkg",
         "@pypi_torch//:pkg",
     ],
 )
