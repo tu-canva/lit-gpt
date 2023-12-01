@@ -169,6 +169,7 @@ def main(
 
     tokenizer = Tokenizer(checkpoint_dir)
     system_prompt, stop_tokens = prompt_config(checkpoint_dir, tokenizer)
+    fabric.print(f"{system_prompt=}")
 
     L.seed_everything(1234)
     while True:
@@ -300,7 +301,7 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
-    if re.search("CodeLlama|Mistral.*Instruct|promodif.*", checkpoint_name):
+    if re.search("CodeLlama|Mistral.*Instruct", checkpoint_name):
         # for CodeLLama, we don't set a default system prompt, but it is supported:
         # https://huggingface.co/blog/codellama#conversational-instructions
         # Mistral does not: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
@@ -321,8 +322,12 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
 # Return a list of descriptions or an empty string if the text does not involve any person."""
 
 
+#         instruction = \
+# """Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
+# Return an empty string if the text does not involve any person."""
+
         instruction = \
-"""Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
+"""Extract a list of human descriptions from the text delimited by triple backticks. Desired description format for each person: < |ethnicity| [gender] {{identity}} >.
 Return an empty string if the text does not involve any person."""
 
 #         instruction = \
@@ -347,7 +352,11 @@ Return an empty string if the text does not involve any person."""
             f"{instruction}"
             "\n"
             "\n"
-            f"text: {{prompt}}"
+            "```"
+            "\n"
+            f"{{prompt}}"
+            "\n"
+            "```"
             "\n"
             f" {e_inst} "
             "\n"
@@ -355,7 +364,7 @@ Return an empty string if the text does not involve any person."""
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
-    if re.search("phi", checkpoint_name):
+    if re.search("phi|promodif.*", checkpoint_name):
         instruction = \
 """Extract a list of human descriptions from the text delimited by triple backticks. Desired description format for each person: < |ethnicity| [gender] {{identity}} >.
 Return an empty string if the text does not involve any person."""

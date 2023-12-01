@@ -41,13 +41,13 @@ val_size = 221  # v0.1a1: 3505
 # Hyperparameters
 num_epochs = 3
 learning_rate = 2e-5  # 3e-4
-batch_size = 64  # 64
+batch_size = 32  # 64
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
 max_iters = num_epochs * (train_size // micro_batch_size)
 max_seq_length = None  # assign value to truncate
-weight_decay = 0.01
+weight_decay = 0.01  # 0.01
 lora_r = 256  # 256
 lora_alpha = 512  # 512
 lora_dropout = 0.05
