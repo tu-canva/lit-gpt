@@ -201,12 +201,16 @@ def main(
 def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tuple[List[int], ...]]:
     checkpoint_name = str(checkpoint_dir)
     if re.search(r"stabilityai.*tuned-alpha", checkpoint_name):
+        # system_prompt = (
+        #     "<|SYSTEM|># StableLM Tuned (Alpha version)\n- StableLM is a helpful and harmless open-source AI language"
+        #     " model developed by StabilityAI.\n- StableLM is excited to be able to help the user, but will refuse to do"
+        #     " anything that could be considered harmful to the user.\n- StableLM is more than just an information"
+        #     " source, StableLM is also able to write poetry, short stories, and make jokes.\n- StableLM will refuse to"
+        #     " participate in anything that could harm a human.<|USER|>{prompt}<|ASSISTANT|>"
+        # )
         system_prompt = (
-            "<|SYSTEM|># StableLM Tuned (Alpha version)\n- StableLM is a helpful and harmless open-source AI language"
-            " model developed by StabilityAI.\n- StableLM is excited to be able to help the user, but will refuse to do"
-            " anything that could be considered harmful to the user.\n- StableLM is more than just an information"
-            " source, StableLM is also able to write poetry, short stories, and make jokes.\n- StableLM will refuse to"
-            " participate in anything that could harm a human.<|USER|>{prompt}<|ASSISTANT|>"
+"""<|SYSTEM|>Extract a list of human descriptions from the text. One line for each person with the desired format: ethnicity,gender,identity.
+Return an empty string if the text does not involve any person.<|USER|>{prompt}<|ASSISTANT|>"""
         )
         stop_tokens = (
             [tokenizer.eos_id],
@@ -301,14 +305,20 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
-    if re.search("CodeLlama|Mistral.*Instruct", checkpoint_name):
+    if re.search("CodeLlama|Mistral.*Instruct|Mistral.*", checkpoint_name):
         # for CodeLLama, we don't set a default system prompt, but it is supported:
         # https://huggingface.co/blog/codellama#conversational-instructions
         # Mistral does not: https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1#instruction-format
         # b_inst, e_inst = "<s>[INST]", "[/INST]"
         # system_prompt = f"{b_inst} {{prompt}} {e_inst}"
 
-        b_inst, e_inst = "[INST]", "[/INST]"
+        # no instruction
+        # b_inst, e_inst = "[INST]", "[/INST]"
+        # system_prompt = (
+        #     f"{b_inst}\n"
+        #     f"{{prompt}}\n"
+        #     f"{e_inst}\n"
+        # )
 
 #         instruction = \
 # """Extract description for each person or group of people from a given text.
@@ -321,14 +331,35 @@ def prompt_config(checkpoint_dir: Path, tokenizer: Tokenizer) -> Tuple[str, Tupl
 
 # Return a list of descriptions or an empty string if the text does not involve any person."""
 
+#         b_inst, e_inst = "[INST]", "[/INST]"
+#         instruction = \
+# """Extract ethnicity, gender and name of every person from a text, use CSV format. Return an empty string if the text does not involve any person."""
+#         system_prompt = (
+#             f"{b_inst}\n"
+#             f"{instruction}\n"
+#             "\n"
+#             f"Text: {{prompt}}\n"
+#             f"{e_inst}\n"
+#         )
+
+        b_inst, e_inst = "[INST]", "[/INST]"
+        instruction = \
+"""Extract a list of human descriptions from the text. One line for each person with the desired format: ethnicity,gender,identity.
+Return an empty string if the text does not involve any person."""
+        system_prompt = (
+            f"{b_inst}\n"
+            f"{instruction}\n"
+            "\n"
+            f"Text: {{prompt}}\n"
+            f"{e_inst}\n"
+        )
 
 #         instruction = \
-# """Extract a list of descriptions for everyone or group of people from a given text. Desire description format: < |ethnicity| [gender] {{identity}} >.
-# Return an empty string if the text does not involve any person."""
-
-        instruction = \
-"""Extract a list of human descriptions from the text delimited by triple backticks. Desired description format for each person: < |ethnicity| [gender] {{identity}} >.
-Return an empty string if the text does not involve any person."""
+# """Extract a list of human descriptions from the text delimited by triple backticks. One line for each person with the desired format: ethnicity,gender,person.
+# - Output empty string for ethnicity and gender if they are not specified.
+# - Output # for ethnicity and gender for a personal name.
+# - Use the same words in singular or plural form of the person in the text.
+# Return nothing if the text does not involve any person."""
 
 #         instruction = \
 # """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation.
@@ -345,41 +376,28 @@ Return an empty string if the text does not involve any person."""
 # Send back # instead of the same prompt if no modifications are needed."""
 
         # instruction = """You are a master prompt engineer! I will provide you with a prompt. Your job is to modify the prompt according to the rules and send back the modified prompt without explanation. Send back # instead of the same prompt if no modifications are needed."""
+        # system_prompt = (
+        #     f"{b_inst}\n"
+        #     f"{instruction}\n"
+        #     "\n"
+        #     f"Text: {{prompt}}\n"
+        #     f"{e_inst}\n"
+        # )
 
-        system_prompt = (
-            f" {b_inst} "
-            "\n"
-            f"{instruction}"
-            "\n"
-            "\n"
-            "```"
-            "\n"
-            f"{{prompt}}"
-            "\n"
-            "```"
-            "\n"
-            f" {e_inst} "
-            "\n"
-        )
         stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
-    if re.search("phi|promodif.*", checkpoint_name):
+    if re.search("phi", checkpoint_name):
         instruction = \
-"""Extract a list of human descriptions from the text delimited by triple backticks. Desired description format for each person: < |ethnicity| [gender] {{identity}} >.
+"""Extract a list of human descriptions from the text delimited by triple backticks. One line for each person with the desired format: ethnicity,gender,identity.
 Return an empty string if the text does not involve any person."""
 
         system_prompt = (
-            f"{instruction}"
+            f"{instruction}\n"
             "\n"
-            "```"
+            f"Text: ```{{prompt}}```\n"
             "\n"
-            f"{{prompt}}"
-            "\n"
-            "```"
-            "\n"
-            "\n"
-            f"Answer:"
+            f"Answer:\n"
         )
 
         stop_tokens = (
@@ -390,6 +408,52 @@ Return an empty string if the text does not involve any person."""
             # to stop or else things like code generation wouldn't work
             # [198, 198],  # '\n', '\n'
         )
+        return system_prompt, stop_tokens
+    
+    if re.search("promodif.*", checkpoint_name):
+        # no instruction
+        # b_inst, e_inst = "[INST]", "[/INST]"
+        # system_prompt = (
+        #     f"{b_inst}\n"
+        #     f"{{prompt}}\n"
+        #     f"{e_inst}\n"
+        # )
+
+#         b_inst, e_inst = "[INST]", "[/INST]"
+#         instruction = \
+# """Extract ethnicity, gender and name of every person from a text, use CSV format. Return an empty string if the text does not involve any person."""
+#         system_prompt = (
+#             f"{b_inst}\n"
+#             f"{instruction}\n"
+#             "\n"
+#             f"Text: {{prompt}}\n"
+#             f"{e_inst}\n"
+#         )
+
+        b_inst, e_inst = "[INST]", "[/INST]"
+        instruction = \
+"""Extract a list of human descriptions from the text. One line for each person with the desired format: ethnicity,gender,identity.
+Return an empty string if the text does not involve any person."""
+        system_prompt = (
+            f"{b_inst}\n"
+            f"{instruction}\n"
+            "\n"
+            f"Text: {{prompt}}\n"
+            f"{e_inst}\n"
+        )
+
+#         system_prompt = (
+# """<|SYSTEM|>Extract a list of human descriptions from the text. One line for each person with the desired format: ethnicity,gender,identity.
+# Return an empty string if the text does not involve any person.<|USER|>{prompt}<|ASSISTANT|>"""
+#         )
+#         stop_tokens = (
+#             [tokenizer.eos_id],
+#             [tokenizer.token_to_id("<|SYSTEM|>")],
+#             [tokenizer.token_to_id("<|ASSISTANT|>")],
+#             [tokenizer.token_to_id("<|USER|>")],
+#         )        
+
+        stop_tokens = ([tokenizer.eos_id],)
         return system_prompt, stop_tokens
 
     # default format

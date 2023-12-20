@@ -35,13 +35,14 @@ use_wandb = True
 log_interval = 1
 devices = 1
 
-train_size = 1982  # v0.1a1: 31501
-val_size = 221  # v0.1a1: 3505
+train_size = 2102  # v0.1a1: 31501
+val_size = 234  # v0.1a1: 3505
 
 # Hyperparameters
+base_model = 'Mistral-7B-Instruct-v0.1'
 num_epochs = 3
 learning_rate = 2e-5  # 3e-4
-batch_size = 32  # 64
+batch_size = 64  # 64
 micro_batch_size = 1
 gradient_accumulation_iters = batch_size // micro_batch_size
 assert gradient_accumulation_iters > 0
@@ -63,8 +64,8 @@ num_evals = 100
 eval_interval = (max_iters // gradient_accumulation_iters) // num_evals  # num_steps // num_evals
 eval_interval = max(eval_interval, 1)
 # save_interval = eval_interval
-# eval_iters = val_size // micro_batch_size
-eval_iters = 221  # val_size
+eval_iters = val_size // micro_batch_size
+# eval_iters = 221
 eval_max_new_tokens = 100
 
 hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str)) and not k.startswith("_")}
