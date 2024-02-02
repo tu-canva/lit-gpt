@@ -6,7 +6,7 @@ py_library(
         "lit_gpt/**/*.py",
     ]),
     visibility = [
-        "//ingredient_generation_server/models:__subpackages__",
+        "//moderation_server/models:__subpackages__",
     ],
     deps = [
         "@pypi_bitsandbytes//:pkg",
